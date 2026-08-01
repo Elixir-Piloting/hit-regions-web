@@ -19,7 +19,7 @@ cursor-polling workaround exists at all.
 
 ```bash
 # from a Tauri app
-pnpm add hit-regions-web@github:Elixir-Piloting/hit-regions-web#v1.2.0
+pnpm add hit-regions-web@github:Elixir-Piloting/hit-regions-web#v1.3.0
 ```
 
 ## Usage
@@ -119,6 +119,35 @@ export function Island() {
 }
 ```
 
+### `useCursorPosition()`
+
+Live global cursor position, updated as the mouse moves. Subscribes to the
+`cursor-moved` event that `hit-regions-rs` emits from its existing ~60 Hz
+polling loop, so you get continuous updates **without polling the
+`cursor_position` command yourself** (that command is still there for on-demand
+one-shot reads).
+
+Returns `{ x, y }` in the same logical CSS-pixel space `getBoundingClientRect()`
+reports (relative to the overlay window's top-left), or `null` until the first
+event arrives. The value is always the true global position — it is not gated
+by click-through state, so it updates whether or not the cursor is inside a
+registered hit region.
+
+```tsx
+import { useCursorPosition } from "hit-regions-web";
+
+export function CursorReadout() {
+  const cursor = useCursorPosition();
+  return (
+    <span>
+      {cursor ? `${Math.round(cursor.x)}, ${Math.round(cursor.y)}` : "…"}
+    </span>
+  );
+}
+```
+
+Outside a Tauri webview the hook no-ops and stays `null`.
+
 ### `HitRegionProvider`
 
 Owns the shared registry. Mount once, high in the tree (in the root layout).
@@ -148,13 +177,15 @@ Click-outside of any focusable region releases overlay focus.
 ## Frontend contract with the Rust engine
 
 This package sends `update_hit_regions` and `set_overlay_focus` IPC calls for
-region behavior, queries `primary_display_size` via `useDisplaySize`, and — via
-`useOverlayLifecycle` — the `overlay-ready`, `overlay-heartbeat`, and
-`overlay-fatal` events the Rust watchdog listens for. That covers the full
-frontend side of the system; the only remaining glue is mounting
-`<HitRegionProvider>` and the lifecycle hook once at your app root, and
-registering `update_hit_regions`, `set_overlay_focus`, and
-`primary_display_size` in the Rust `invoke_handler!`.
+region behavior, queries `primary_display_size` via `useDisplaySize`, listens
+for the `cursor-moved` event via `useCursorPosition` (and can call the
+`cursor_position` command directly), and — via `useOverlayLifecycle` — the
+`overlay-ready`, `overlay-heartbeat`, and `overlay-fatal` events the Rust
+watchdog listens for. That covers the full frontend side of the system; the
+only remaining glue is mounting `<HitRegionProvider>` and the lifecycle hook
+once at your app root, and registering `update_hit_regions`,
+`set_overlay_focus`, `primary_display_size`, and `cursor_position` in the Rust
+`invoke_handler!`.
 
 ## License
 
