@@ -6,4 +6,6 @@ export { HitRegionProvider, useHitRegionContext } from "./hit-region-context";
 export { useHitRegion } from "./use-hit-region";
 export { useOverlayLifecycle } from "./use-overlay-lifecycle";
 export type { OverlayLifecycleOptions } from "./use-overlay-lifecycle";
+export { useDisplaySize } from "./use-display-size";
+export type { DisplaySize } from "./use-display-size";
 export type { Rect, NamedRect } from "./types";
