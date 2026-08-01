@@ -19,7 +19,7 @@ cursor-polling workaround exists at all.
 
 ```bash
 # from a Tauri app
-pnpm add hit-regions-web@github:Elixir-Piloting/hit-regions-web#v1.0.0
+pnpm add hit-regions-web@github:Elixir-Piloting/hit-regions-web#v1.1.0
 ```
 
 ## Usage
@@ -67,6 +67,38 @@ transforms correct.
 Lower-level hook. Attach the returned `ref` to any DOM element to make it a hit
 region. Returns `{ ref }`.
 
+### `useOverlayLifecycle({ heartbeatMs })`
+
+The watchdog glue. Call it once from a single mounted client component to keep
+the Rust watchdog (`hit-regions-rs`) informed of the frontend's health so the
+overlay can never lock the desktop:
+
+- emits `overlay-ready` once on mount — Rust only shows the (initially hidden)
+  window after this, so a failed page load never produces a full-screen
+  takeover;
+- emits `overlay-heartbeat` every `heartbeatMs` (default `2000`) — Rust hides
+  the window (and in release builds exits the app) if heartbeats stop for too
+  long, and re-shows it when they resume;
+- emits `overlay-fatal` once (debounced) on a JS error or unhandled rejection —
+  Rust exits immediately in release builds.
+
+```tsx
+import { useOverlayLifecycle } from "hit-regions-web";
+
+export function OverlayLifecycle() {
+  useOverlayLifecycle();
+  return null;
+}
+
+// mount <OverlayLifecycle /> once in your root layout, alongside
+// <HitRegionProvider>
+```
+
+All IPC is behind `isTauri()` guards, so it no-ops under a plain dev server in
+a browser. If you use this hook, you do **not** need to emit the liveness events
+yourself; if you'd rather hand-roll the glue, the events are `overlay-ready`,
+`overlay-heartbeat`, `overlay-fatal` (see the `hit-regions-rs` README).
+
 ### `HitRegionProvider`
 
 Owns the shared registry. Mount once, high in the tree (in the root layout).
@@ -95,10 +127,11 @@ Click-outside of any focusable region releases overlay focus.
 
 ## Frontend contract with the Rust engine
 
-This package sends `update_hit_regions` and `set_overlay_focus` IPC calls. It
-does **not** emit the watchdog liveness events — that's app glue. Your app
-should emit `overlay-ready` once, then `overlay-heartbeat` every ~2 s (see the
-`hit-regions-rs` README).
+This package sends `update_hit_regions` and `set_overlay_focus` IPC calls for
+region behavior, and — via `useOverlayLifecycle` — the `overlay-ready`,
+`overlay-heartbeat`, and `overlay-fatal` events the Rust watchdog listens for.
+That covers the full frontend side of the system; the only remaining glue is
+mounting `<HitRegionProvider>` and the lifecycle hook once at your app root.
 
 ## License
 

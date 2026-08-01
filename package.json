@@ -1,6 +1,6 @@
 {
   "name": "hit-regions-web",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "React hit-region primitives for click-through-capable Tauri overlay windows",
   "type": "module",
   "main": "./dist/index.js",
