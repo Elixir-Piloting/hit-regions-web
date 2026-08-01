@@ -19,7 +19,7 @@ cursor-polling workaround exists at all.
 
 ```bash
 # from a Tauri app
-pnpm add hit-regions-web@github:Elixir-Piloting/hit-regions-web#v1.1.0
+pnpm add hit-regions-web@github:Elixir-Piloting/hit-regions-web#v1.2.0
 ```
 
 ## Usage
@@ -99,6 +99,26 @@ a browser. If you use this hook, you do **not** need to emit the liveness events
 yourself; if you'd rather hand-roll the glue, the events are `overlay-ready`,
 `overlay-heartbeat`, `overlay-fatal` (see the `hit-regions-rs` README).
 
+### `useDisplaySize()`
+
+Primary monitor's logical (CSS-pixel) size, fetched once on mount via the
+`primary_display_size` command from `hit-regions-rs` (register it in your
+`invoke_handler!`). Returns `{ width, height }` in the same units
+`getBoundingClientRect()` reports — or `null` while the command is resolving
+(and outside a Tauri webview). Use it to size overlay UI against the display,
+e.g. an island that defaults to half the display width, animating from a
+fallback once the value lands.
+
+```tsx
+import { useDisplaySize } from "hit-regions-web";
+
+export function Island() {
+  const display = useDisplaySize();
+  const width = display ? Math.round(display.width / 2) : 640;
+  return <div style={{ width }}>...</div>;
+}
+```
+
 ### `HitRegionProvider`
 
 Owns the shared registry. Mount once, high in the tree (in the root layout).
@@ -128,10 +148,13 @@ Click-outside of any focusable region releases overlay focus.
 ## Frontend contract with the Rust engine
 
 This package sends `update_hit_regions` and `set_overlay_focus` IPC calls for
-region behavior, and — via `useOverlayLifecycle` — the `overlay-ready`,
-`overlay-heartbeat`, and `overlay-fatal` events the Rust watchdog listens for.
-That covers the full frontend side of the system; the only remaining glue is
-mounting `<HitRegionProvider>` and the lifecycle hook once at your app root.
+region behavior, queries `primary_display_size` via `useDisplaySize`, and — via
+`useOverlayLifecycle` — the `overlay-ready`, `overlay-heartbeat`, and
+`overlay-fatal` events the Rust watchdog listens for. That covers the full
+frontend side of the system; the only remaining glue is mounting
+`<HitRegionProvider>` and the lifecycle hook once at your app root, and
+registering `update_hit_regions`, `set_overlay_focus`, and
+`primary_display_size` in the Rust `invoke_handler!`.
 
 ## License
 
