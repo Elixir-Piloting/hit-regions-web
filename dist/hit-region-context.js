@@ -10,17 +10,25 @@ export function useHitRegionContext() {
     }
     return ctx;
 }
-/** Below this change (px) a rect update isn't worth re-sending to Rust. */
 const EPSILON = 0.5;
 /**
  * Wraps the app (put it in the root layout) and owns the shared hit-region
  * registry. The registry is flushed to Rust as a whole, once per animation
- * frame at most, so N components updating together produce ONE IPC call.
+ * frame at most.
+ *
+ * `idPrefix` lets the host namespace regions per child subtree (one mod per
+ * nested provider). The outermost provider (no parent context) owns the
+ * registry + flush; any provider that finds a parent becomes a pure
+ * id-transform layer that forwards to the parent with its prefix prepended.
+ * Prefixes chain across nesting depth. A mod's own `id` values are its own
+ * concern — the host guarantees global uniqueness via the prefix.
  */
-export function HitRegionProvider({ children }) {
+export function HitRegionProvider({ idPrefix = "", children, }) {
+    const parent = useContext(HitRegionContext);
     const registryRef = useRef({});
     const focusNodesRef = useRef(new Set());
     const flushScheduledRef = useRef(false);
+    const prefixId = useCallback((id) => (idPrefix ? idPrefix + id : id), [idPrefix]);
     const flush = useCallback(() => {
         flushScheduledRef.current = false;
         const regions = Object.entries(registryRef.current).map(([id, rect]) => ({
@@ -36,6 +44,10 @@ export function HitRegionProvider({ children }) {
         requestAnimationFrame(flush);
     }, [flush]);
     const register = useCallback((id, rect) => {
+        if (parent) {
+            parent.register(prefixId(id), rect);
+            return;
+        }
         const prev = registryRef.current[id];
         if (prev &&
             Math.abs(prev.x - rect.x) < EPSILON &&
@@ -47,23 +59,36 @@ export function HitRegionProvider({ children }) {
         }
         registryRef.current[id] = rect;
         scheduleFlush();
-    }, [scheduleFlush]);
+    }, [parent, prefixId, scheduleFlush]);
     const deregister = useCallback((id) => {
+        if (parent) {
+            parent.deregister(prefixId(id));
+            return;
+        }
         if (!(id in registryRef.current))
             return;
         delete registryRef.current[id];
         scheduleFlush();
-    }, [scheduleFlush]);
-    const registerFocusNode = useCallback((_id, node) => {
+    }, [parent, prefixId, scheduleFlush]);
+    const registerFocusNode = useCallback((id, node) => {
+        if (parent) {
+            parent.registerFocusNode(prefixId(id), node);
+            return;
+        }
         focusNodesRef.current.add(node);
-    }, []);
-    const deregisterFocusNode = useCallback((_id, node) => {
+    }, [parent, prefixId]);
+    const deregisterFocusNode = useCallback((id, node) => {
+        if (parent) {
+            parent.deregisterFocusNode(prefixId(id), node);
+            return;
+        }
         focusNodesRef.current.delete(node);
-    }, []);
-    // Click-outside of any focusable region -> release overlay focus. Only
-    // reachable while the cursor is over some region (pass-through is off there),
-    // e.g. the user clicks a non-focusable part of the overlay.
+    }, [parent, prefixId]);
+    // Click-outside detection only applies at the root (focus nodes are only
+    // tracked there).
     useEffect(() => {
+        if (parent)
+            return;
         const onPointerDown = (event) => {
             const target = event.target;
             if (!target)
@@ -75,12 +100,7 @@ export function HitRegionProvider({ children }) {
         };
         document.addEventListener("pointerdown", onPointerDown, true);
         return () => document.removeEventListener("pointerdown", onPointerDown, true);
-    }, []);
-    const value = useMemo(() => ({
-        register,
-        deregister,
-        registerFocusNode,
-        deregisterFocusNode,
-    }), [register, deregister, registerFocusNode, deregisterFocusNode]);
+    }, [parent]);
+    const value = useMemo(() => ({ register, deregister, registerFocusNode, deregisterFocusNode }), [register, deregister, registerFocusNode, deregisterFocusNode]);
     return _jsx(HitRegionContext.Provider, { value: value, children: children });
 }

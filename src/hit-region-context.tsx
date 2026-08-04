@@ -13,11 +13,8 @@ import type { Rect } from "./types";
 import { safeInvoke } from "./invoke";
 
 interface HitRegionContextValue {
-  /** Register or update a region's bounds in the shared registry. */
   register: (id: string, rect: Rect) => void;
-  /** Remove a region. Must run on unmount or a stale rect becomes a dead zone. */
   deregister: (id: string) => void;
-  /** Track the DOM node of a focusable region for click-outside detection. */
   registerFocusNode: (id: string, node: HTMLElement) => void;
   deregisterFocusNode: (id: string, node: HTMLElement) => void;
 }
@@ -32,18 +29,34 @@ export function useHitRegionContext(): HitRegionContextValue {
   return ctx;
 }
 
-/** Below this change (px) a rect update isn't worth re-sending to Rust. */
 const EPSILON = 0.5;
 
 /**
  * Wraps the app (put it in the root layout) and owns the shared hit-region
  * registry. The registry is flushed to Rust as a whole, once per animation
- * frame at most, so N components updating together produce ONE IPC call.
+ * frame at most.
+ *
+ * `idPrefix` lets the host namespace regions per child subtree (one mod per
+ * nested provider). The outermost provider (no parent context) owns the
+ * registry + flush; any provider that finds a parent becomes a pure
+ * id-transform layer that forwards to the parent with its prefix prepended.
+ * Prefixes chain across nesting depth. A mod's own `id` values are its own
+ * concern — the host guarantees global uniqueness via the prefix.
  */
-export function HitRegionProvider({ children }: { children: ReactNode }) {
+export function HitRegionProvider({
+  idPrefix = "",
+  children,
+}: {
+  idPrefix?: string;
+  children: ReactNode;
+}) {
+  const parent = useContext(HitRegionContext);
+
   const registryRef = useRef<Record<string, Rect>>({});
   const focusNodesRef = useRef<Set<HTMLElement>>(new Set());
   const flushScheduledRef = useRef(false);
+
+  const prefixId = useCallback((id: string) => (idPrefix ? idPrefix + id : id), [idPrefix]);
 
   const flush = useCallback(() => {
     flushScheduledRef.current = false;
@@ -62,6 +75,10 @@ export function HitRegionProvider({ children }: { children: ReactNode }) {
 
   const register = useCallback(
     (id: string, rect: Rect) => {
+      if (parent) {
+        parent.register(prefixId(id), rect);
+        return;
+      }
       const prev = registryRef.current[id];
       if (
         prev &&
@@ -76,30 +93,48 @@ export function HitRegionProvider({ children }: { children: ReactNode }) {
       registryRef.current[id] = rect;
       scheduleFlush();
     },
-    [scheduleFlush]
+    [parent, prefixId, scheduleFlush]
   );
 
   const deregister = useCallback(
     (id: string) => {
+      if (parent) {
+        parent.deregister(prefixId(id));
+        return;
+      }
       if (!(id in registryRef.current)) return;
       delete registryRef.current[id];
       scheduleFlush();
     },
-    [scheduleFlush]
+    [parent, prefixId, scheduleFlush]
   );
 
-  const registerFocusNode = useCallback((_id: string, node: HTMLElement) => {
-    focusNodesRef.current.add(node);
-  }, []);
+  const registerFocusNode = useCallback(
+    (id: string, node: HTMLElement) => {
+      if (parent) {
+        parent.registerFocusNode(prefixId(id), node);
+        return;
+      }
+      focusNodesRef.current.add(node);
+    },
+    [parent, prefixId]
+  );
 
-  const deregisterFocusNode = useCallback((_id: string, node: HTMLElement) => {
-    focusNodesRef.current.delete(node);
-  }, []);
+  const deregisterFocusNode = useCallback(
+    (id: string, node: HTMLElement) => {
+      if (parent) {
+        parent.deregisterFocusNode(prefixId(id), node);
+        return;
+      }
+      focusNodesRef.current.delete(node);
+    },
+    [parent, prefixId]
+  );
 
-  // Click-outside of any focusable region -> release overlay focus. Only
-  // reachable while the cursor is over some region (pass-through is off there),
-  // e.g. the user clicks a non-focusable part of the overlay.
+  // Click-outside detection only applies at the root (focus nodes are only
+  // tracked there).
   useEffect(() => {
+    if (parent) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (!target) return;
@@ -112,15 +147,10 @@ export function HitRegionProvider({ children }: { children: ReactNode }) {
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, []);
+  }, [parent]);
 
   const value = useMemo(
-    () => ({
-      register,
-      deregister,
-      registerFocusNode,
-      deregisterFocusNode,
-    }),
+    () => ({ register, deregister, registerFocusNode, deregisterFocusNode }),
     [register, deregister, registerFocusNode, deregisterFocusNode]
   );
 

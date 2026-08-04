@@ -153,6 +153,14 @@ Outside a Tauri webview the hook no-ops and stays `null`.
 Owns the shared registry. Mount once, high in the tree (in the root layout).
 Click-outside of any focusable region releases overlay focus.
 
+## Multi-mod namespacing
+
+Pass `idPrefix` to a nested `HitRegionProvider` to namespace every region id
+under that subtree. The engine hosts one nested provider per mod with
+`idPrefix={modId + ":"}`, so mods may freely reuse local ids without colliding
+in the shared registry. Providers chain: a nested provider forwards to its
+parent with the prefix prepended.
+
 ## Behavior
 
 - **Batching / throttling.** All region updates go through one flush path: the
